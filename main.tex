@@ -1,0 +1,375 @@
+\documentclass[a0,portrait]{a0poster}
+
+\usepackage{multicol}
+\columnsep=80pt
+\columnseprule=3pt
+
+\usepackage[svgnames]{xcolor}
+\usepackage{times}
+\usepackage{graphicx}
+\graphicspath{{figures/}}
+\usepackage{booktabs}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{amsfonts, amsmath, amsthm, amssymb}
+\usepackage{wrapfig}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{tabularx}
+
+\setlist[itemize]{leftmargin=1.5em, itemsep=0.2em, topsep=0.3em}
+
+\begin{document}
+
+%----------------------------------------------------------------------------------------
+%	POSTER HEADER
+%----------------------------------------------------------------------------------------
+
+\begin{minipage}[b]{0.78\linewidth}
+\VeryHuge \color{NavyBlue} \textbf{DSON: JSON CRDT Using Delta-Mutations} \\
+\VeryHuge \color{NavyBlue} \textbf{For Document Stores} \color{Black}\\[0.5cm]
+\huge\textit{DAS 839 - NoSQL Systems $\mid$ Course Poster Presentation}\\[0.8cm]
+\huge \textbf{Shantanu T}\\
+\Large IMT2023056 \texttt{T.Shantanu@iiitb.ac.in}\\
+\huge \textbf{Arik Rinberg, Tomer Solomon, Roee Shlomo, Guy Khazma, Gal Lushi, Idit Keidar, Paula Ta-Shma}\\[0.3cm]
+\huge International Institute of Information Technology Bangalore, India\\[0.4cm]
+\end{minipage}
+%
+\begin{minipage}[b]{0.22\linewidth}
+\flushright
+\includegraphics[width=10cm]{iiitb_logo.png}\\
+\end{minipage}
+
+\vspace{1cm}
+
+%----------------------------------------------------------------------------------------
+
+\begin{multicols}{3}
+
+%----------------------------------------------------------------------------------------
+%	ABSTRACT
+%----------------------------------------------------------------------------------------
+
+\color{Navy}
+
+\begin{abstract}
+\textbf{DSON} is a space-efficient $\delta$-based CRDT for distributed JSON document stores providing \textbf{strong eventual consistency}, causal consistency, and read-your-writes guarantees. Unlike prior approaches (Automerge, Yjs) that store metadata proportional to update count, DSON bounds metadata at $\mathcal{O}(k^2D + n\log n)$. The key novelty is a composable, causal $\delta$-based \textbf{ORArray} CRDT supporting concurrent move operations without tombstones or garbage collection.
+\end{abstract}
+
+%----------------------------------------------------------------------------------------
+%	ORARRAY SEMANTICS
+%----------------------------------------------------------------------------------------
+
+\color{Black}
+\section*{ORArray Semantics (Section 5)}
+
+\textbf{Core Representation:} Each array element identified by unique dot $uid \in \mathcal{I} \times \mathbb{N}$:
+\[
+uid \;\mapsto\; (v,\; P) \quad P \subseteq \mathbb{R}
+\]
+
+\textbf{Observed-Remove Semantics:} Only observed state can be removed. Given execution $\sigma$:
+\[
+\mathcal{X}_{apply}(\sigma) \triangleq \big\{X^\delta \mid \exists\,apply_i(uid,o^\delta_i,p)\in Ops(\sigma)
+\]
+\[
+\wedge\;\nexists\,delete_j(uid)\succ_\sigma apply_i\big\}
+\]
+\[
+X(\sigma) \triangleq \begin{cases} \bigsqcup_{X^\delta \in \mathcal{X}_{apply}} X^\delta & \mathcal{X}_{apply} \neq \emptyset \\ \bot & \text{otherwise} \end{cases}
+\]
+
+\textbf{Position Semantics:} Let $maximal(\sigma,uid)$ be the set of non-superseded operations on $uid$:
+\[
+P_{apply}(uid,\sigma) \triangleq \{p \mid apply(uid,o^\delta_i,p) \in maximal(\sigma,uid)\}
+\]
+\[
+P_{move}(uid,\sigma) \triangleq \{p \mid move(uid,p) \in maximal(\sigma,uid)\}
+\]
+At execution end, position set $P(uid)$ satisfies:
+\[
+P_{apply} \;\subseteq\; P(uid) \;\subseteq\; P_{apply} \cup P_{move}
+\]
+
+\textbf{Ordering:} Replicas pick $\max(P)$ per element for deterministic sort.
+
+\textbf{Stable Identifiers:} Positions from dense ordered set (e.g.\ $\mathbb{R}$); insert between $p_1$ and $p_2$ assigns $(p_1+p_2)/2$. No shifting of other elements.
+
+%----------------------------------------------------------------------------------------
+%	COMPDOTFUN
+%----------------------------------------------------------------------------------------
+
+\section*{CompDotFun --- Key Innovation}
+
+New dot store combining DotMap and DotFun:
+\[
+\textbf{CompDotFun}\langle V{:}\,DotStore\rangle \;:\; \mathcal{I} \times \mathbb{N} \;\mapsto\; V
+\]
+\[
+dots(m) \;=\; dom\,m \;\cup\; \bigcup_{v \in ran\,m} dots(v)
+\]
+
+\textbf{Join Semantics} (Causal$\langle$CompDotFun$\rangle$):
+\[
+(m,c) \sqcup (m',c') \;=\; \Big(\{d \mapsto v(d) \mid d \in dom\,m \cap dom\,m',\;v(d)\neq\bot\}
+\]
+\[
+\cup\;\{(d,v)\in m \mid d\notin c'\} \;\cup\; \{(d,v)\in m' \mid d\notin c\},\;\; c\cup c'\Big)
+\]
+
+\textbf{Corollary:} Causal$\langle$CompDotFun$\rangle$ is a join-semilattice.
+
+\textbf{Why necessary:} DotMap keys survive concurrent updates (resurrection risk); CompDotFun keys (roots) are \textbf{permanently deleted once removed}, enabling correct position overwriting.
+
+%----------------------------------------------------------------------------------------
+%	ORARRAY ALGORITHM
+%----------------------------------------------------------------------------------------
+
+\section*{ORArray Algorithm (Section 5.2)}
+
+\textbf{State type:}
+\[
+\mathtt{Causal}\Big\langle\mathtt{DotMap}\big\langle\mathcal{I}{\times}\mathbb{N},\;(DS,\;\mathtt{CompDotFun}\langle\mathtt{DotFun}\langle\mathbb{P}\rangle\rangle)\big\rangle\Big\rangle
+\]
+
+\textbf{Position as Forest (depth-3):} Element with positions $\{0.3, 54\}$:
+\[
+\{d_1 \mapsto \{d_2 \mapsto 0.3\},\;\; d_3 \mapsto \{d_4 \mapsto 54\}\}
+\]
+$d_1, d_3$ are CompDotFun roots; $d_2, d_4$ are DotFun leaves.
+
+\begin{itemize}
+  \item \textbf{apply}$(uid,o^\delta_i,p)$: Generate dot $d$; apply $o^\delta_i$ to value; insert new tree $\{d\mapsto\{d\mapsto p\}\}$; add old roots to causal context (permanently removes them).
+  \item \textbf{move}$(uid,p)$: Keep all roots; replace children of every root with new dot $d\mapsto p$; old children added to causal context.
+  \item \textbf{delete}$(uid)$: Add all $dots(m[uid])$ to causal context; return $(\emptyset, c')$.
+  \item \textbf{get}$(uid)$: Return $(value, P)$ from local state.
+\end{itemize}
+
+%----------------------------------------------------------------------------------------
+%	CONCURRENCY ANALYSIS
+%----------------------------------------------------------------------------------------
+
+\section*{Concurrency Analysis}
+
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\columnwidth}{@{}p{2.2cm}p{2.2cm}X@{}}
+\toprule
+\textbf{Op 1} & \textbf{Op 2} & \textbf{Result} \\
+\midrule
+apply & apply & Both values retained (MVReg); multiple position trees merged \\
+apply & move & apply wins on value; both positions may coexist in $P$ \\
+apply & delete & apply wins (OR semantics); element survives \\
+move  & delete & delete wins; element removed \\
+move  & move  & Both positions retained; $\max(P)$ used for ordering \\
+\bottomrule
+\end{tabularx}
+
+\vspace{0.5em}
+\textbf{Convergence:} Joins are commutative, associative, idempotent $\Rightarrow$ all replicas delivering the same deltas reach identical state.
+
+%----------------------------------------------------------------------------------------
+%	JSON CRDT
+%----------------------------------------------------------------------------------------
+
+\section*{JSON CRDT --- DSON (Section 6)}
+
+Recursive JSON structure:
+\[
+Value = Map \mid Array \mid Register, \quad Register = String \mid Number \mid null
+\]
+
+\textbf{DSON Composition:}
+\begin{itemize}
+  \item \textbf{Register} $\rightarrow$ MVReg (multi-value register, OR semantics)
+  \item \textbf{Map} $\rightarrow$ ORMap (composable, $\delta$-based, OR semantics)
+  \item \textbf{Array} $\rightarrow$ ORArray (novel contribution, OR semantics)
+\end{itemize}
+
+\textbf{Type Conflicts:} Each variable nested in ORMap with 3 keys $\{Map,Array,MVReg\}$. Priority: $Map > Array > MVReg$. Type change $=$ add new key $+$ remove old keys.
+
+\textbf{Consistency Guarantees:}
+\begin{itemize}
+  \item \textbf{Read-your-writes}: Delta merged before subsequent reads (sequential replica).
+  \item \textbf{Causal Consistency}: Causal anti-entropy delivers $\delta$ only after all causally preceding $\delta$'s arrive.
+  \item \textbf{Strong Eventual Consistency}: Join-semilattice $+$ anti-entropy $\Rightarrow$ convergence.
+\end{itemize}
+
+\textbf{Metadata Complexity:}\\
+Steady state (no concurrency): $\mathcal{O}(D + n\log n)$\\
+With $k$ concurrent operations (worst case):
+\[
+\mathcal{O}(k^2 D + n\log n)
+\]
+Causal context compressed: $prefix:\mathcal{I}\mapsto\mathbb{N}$ plus sparse exception set $\Rightarrow$ $\mathcal{O}(n\log n)$.
+
+%----------------------------------------------------------------------------------------
+%	IMPLEMENTATION
+%----------------------------------------------------------------------------------------
+
+\section*{Implementation (Section 7)}
+
+\textbf{Prototype:} $\sim$2500 lines of JavaScript~\cite{rinberg2021dson}. API mirrors Automerge~\cite{automerge}:
+\begin{itemize}
+  \item \texttt{init()} --- empty document
+  \item \texttt{from(obj)} --- populate from JSON object
+  \item \texttt{change(doc,\,f)} --- apply mutation $f$; store $\delta$ locally
+  \item \texttt{applyChanges(doc,\,$\delta$)} --- compute $X \sqcup X^\delta$
+  \item \texttt{getChanges(doc)} --- coalesce deltas for broadcast
+\end{itemize}
+
+\textbf{JavaScript Proxies:} Standard JS syntax auto-transformed into delta mutators (e.g.\ $doc.k_1[0]=\{k_2:1\}$ $\rightarrow$ ORMap.apply $\rightarrow$ ORArray.apply $\rightarrow$ MVReg.write).
+
+\textbf{Delta Communication:} Only $X^\delta$ broadcast (not full state). Causal anti-entropy~\cite{almeida2018delta} retransmits, enforces causal order, merges batches.
+
+\textbf{No Tombstones / No GC:} Causal context naturally retires obsolete dots. Zero garbage collection needed --- unlike Automerge (ever-growing history) and Yjs (heuristic GC).
+
+\textbf{Integer Index Wrapper:} \texttt{GetUidFromIdx} and \texttt{GetPosFromIdx} sort by stable identifiers; pluggable schemes (Logoot, LSEQ).
+
+%----------------------------------------------------------------------------------------
+%	EVALUATION
+%----------------------------------------------------------------------------------------
+
+\section*{Evaluation (Section 8)}
+\small
+
+\textbf{Setup:}
+\begin{itemize}
+\item Intel i7-8565U, empty initial documents
+\item Metric: \textbf{byte-length of encoded state}
+\item Compared: \textbf{DSON}, \textbf{Automerge}~\cite{automerge}, \textbf{Yjs}~\cite{yjs}
+\end{itemize}
+
+\vspace{0.3cm}
+
+
+\begin{itemize}
+
+\item \textbf{Map update:} same key updated repeatedly  
+\hspace{0.5cm} → DSON, Yjs: constant  
+\hspace{0.5cm} → Automerge: linear growth  
+
+\item \textbf{Map insert/delete:} repeated insert \& delete  
+\hspace{0.5cm} → DSON: constant  
+\hspace{0.5cm} → Automerge, Yjs: \textbf{unbounded}  
+
+\item \textbf{Array update:} same index updated  
+\hspace{0.5cm} → DSON: constant  
+\hspace{0.5cm} → Others: growing metadata  
+
+\item \textbf{Array insert/delete (char):}  
+\hspace{0.5cm} → DSON, Yjs: constant  
+
+\item \textbf{Array insert/delete (map):}  
+\hspace{0.5cm} → DSON: constant  
+\hspace{0.5cm} → Yjs: grows  
+
+\item \textbf{Array insert/delete (nested array):}  
+\hspace{0.5cm} → DSON: constant  
+\hspace{0.5cm} → Yjs: grows  
+
+\end{itemize}
+
+\vspace{0.3cm}
+
+\textbf{Worst-Case Scenario:}
+\begin{itemize}
+\item All replicas update all elements concurrently, then synchronize
+\item Metadata growth: $\mathcal{O}(k^2)$ per element
+\item Matches theoretical bound; occurs only under extreme contention
+\end{itemize}
+
+\vspace{0.2cm}
+
+\textbf{Randomized Micro-benchmark:}
+\begin{itemize}
+\item 5 replicas, 200 steps, update probability $p_u$, sync probability $p_s$
+\item 10 runs averaged
+\item \textbf{Metadata remains far below worst-case in practice}
+\end{itemize}
+
+%----------------------------------------------------------------------------------------
+%	FUTURE WORK
+%----------------------------------------------------------------------------------------
+
+\section*{Future Work (Section 9)}
+
+\begin{itemize}
+  \item \textbf{Join Decomposition}~\cite{enes2019efficient}: Practical anti-entropy is wasteful; join decomposition yields optimal $\delta$'s for DSON CRDTs --- major bandwidth savings.
+  \item \textbf{Ad-hoc Clients:} Map client dots $(c,i)$ to server dots $(r,l{+}j)$ at upload; server propagates transformed delta --- minimizes short-lived client footprint in causal context.
+  \item \textbf{Efficient Replica Removal:} Naively removing dots risks causality violations (stale update re-application). Safe cleanup protocol is open future work.
+  \item \textbf{Performance Optimization:} DSON is a research prototype; production use requires optimized encoding, faster joins, network-layer integration.
+  \item \textbf{Regional Deployment:} Strong consistency within region; DSON coordinates inter-region. Each region $=$ single replica $\Rightarrow$ bounded $n$.
+\end{itemize}
+
+%----------------------------------------------------------------------------------------
+%	KEY INSIGHTS
+%----------------------------------------------------------------------------------------
+
+\color{SaddleBrown}
+\section*{Key Insights}
+
+\begin{itemize}
+  \item \textbf{CompDotFun} is the core enabler: roots are permanently deleted (unlike DotMap), making position overwriting and move semantics correct without resurrection.
+  \item \textbf{Forest structure} (depth-3 nesting) encodes concurrent positions compactly; $\mathcal{O}(k^2)$ only under adversarial concurrency.
+  \item \textbf{No tombstones} $\Rightarrow$ metadata bounded by live document state, not history --- fundamental advantage for long-lived documents.
+  \item Causal context compression ($prefix + exceptions$) keeps replica overhead at $\mathcal{O}(n\log n)$ regardless of update count.
+\end{itemize}
+
+%----------------------------------------------------------------------------------------
+%	CONCLUSIONS
+%----------------------------------------------------------------------------------------
+
+\color{Black}
+\section*{Conclusions (Section 10)}
+
+\begin{itemize}
+  \item \textbf{DSON} is the first $\delta$-based JSON CRDT with composable maps, arrays, and registers under OR semantics.
+  \item Novel \textbf{ORArray} supports concurrent insert, update, delete, and \textbf{move} without tombstones or garbage collection.
+  \item Metadata bounded by $\mathcal{O}(k^2D + n\log n)$ --- independent of update history; empirically near best-case.
+  \item Formally proven: convergence, OR-semantics correctness, position semantics (Lemmas 5.2--5.4).
+  \item Relieves application developers of manual conflict resolution in distributed document stores.
+  \item Open-source prototype~\cite{rinberg2021dson} outperforms Automerge and Yjs on all metadata benchmarks.
+\end{itemize}
+
+%----------------------------------------------------------------------------------------
+%	REFERENCES
+%----------------------------------------------------------------------------------------
+
+\color{Black}
+
+\begin{thebibliography}{9}
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+
+\bibitem{rinberg2021dson}
+A. Rinberg et al.
+\textit{DSON -- JSON CRDT Using Delta-Mutations.}
+GitHub, 2021. \texttt{github.com/crdt-ibm-research/json-delta-crdt}
+
+\bibitem{automerge}
+Automerge.
+\textit{https://github.com/automerge/automerge}, 2021.
+
+\bibitem{yjs}
+Yjs.
+\textit{https://github.com/yjs/yjs}, 2021.
+
+\bibitem{almeida2018delta}
+P.S. Almeida, A. Shoker, C. Baquero.
+\textit{Delta state replicated data types.}
+J. Parallel Distrib. Comput., 111:162--173, 2018.
+
+\bibitem{shapiro2011crdt}
+M. Shapiro, N. Pregui\c{c}a, C. Baquero, M. Zawirski.
+\textit{Conflict-free replicated data types.}
+SSS 2011, Springer.
+
+\bibitem{enes2019efficient}
+V. Enes, P.S. Almeida, C. Baquero, J. Leit\~{a}o.
+\textit{Efficient synchronization of state-based CRDTs.}
+ICDE 2019, IEEE.
+
+\end{thebibliography}
+
+\end{multicols}
+
+\end{document}
